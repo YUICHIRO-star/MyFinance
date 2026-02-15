@@ -14,6 +14,8 @@ import ExpenseHeatmap from '@/components/ExpenseHeatmap';
 import PortfolioTable from '@/components/PortfolioTable';
 import TransactionLog from '@/components/TransactionLog';
 
+import BalanceAdjustmentForm from '@/components/BalanceAdjustmentForm';
+
 interface DashboardClientProps {
     data: DashboardData;
 }
@@ -28,6 +30,7 @@ export default function DashboardClient({ data }: DashboardClientProps) {
                     totalInvested={data.totalInvested}
                     totalProfitLoss={data.totalProfitLoss}
                     totalProfitLossRate={data.totalProfitLossRate}
+                    bankBalance={data.bankBalance}
                     lastUpdated={data.lastUpdated}
                 />
             </div>
@@ -47,13 +50,17 @@ export default function DashboardClient({ data }: DashboardClientProps) {
                 <PortfolioTable data={data.portfolio} />
             </div>
 
-            {/* ── Row 4: ヒートマップ + 取引履歴 (2:1) ── */}
+            {/* ── Row 4: ヒートマップ + 取引履歴 + 残高調整 ── */}
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                 <div className="lg:col-span-2 animate-fade-in-up opacity-0" style={{ animationDelay: '400ms', animationFillMode: 'forwards' }}>
                     <ExpenseHeatmap data={data.heatmapData} />
                 </div>
-                <div className="animate-fade-in-up opacity-0" style={{ animationDelay: '500ms', animationFillMode: 'forwards' }}>
-                    <TransactionLog records={data.records} limit={8} />
+                <div className="space-y-6 animate-fade-in-up opacity-0" style={{ animationDelay: '500ms', animationFillMode: 'forwards' }}>
+                    <TransactionLog records={data.records} limit={5} />
+                    <BalanceAdjustmentForm
+                        currentBalance={data.bankBalance}
+                        lastUpdated={data.bankLastUpdated}
+                    />
                 </div>
             </div>
         </div>

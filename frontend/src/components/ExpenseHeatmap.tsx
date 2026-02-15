@@ -69,10 +69,10 @@ export default function ExpenseHeatmap({ data }: ExpenseHeatmapProps) {
                         startDate={startDate}
                         endDate={endDate}
                         values={data}
-                        classForValue={getClassForValue}
+                        classForValue={(value: any) => getClassForValue(value ?? null)}
                         showWeekdayLabels
                         gutterSize={3}
-                        onMouseOver={(event: React.MouseEvent, value: HeatmapValue | null) => {
+                        onMouseOver={(event: any, value: any) => {
                             if (value && value.count > 0) {
                                 const rect = (event.target as HTMLElement).getBoundingClientRect();
                                 setTooltip({

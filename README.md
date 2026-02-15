@@ -82,6 +82,7 @@ npm run dev
 ## 今後のロードマップ
 
 - [x] Phase 1: 投信自動取得・口数計算・DB保存
+- [x] Phase 1.5: 銀行入出金メール解析・残高推定
 - [ ] Phase 2: クレジットカード決済メール解析
 - [x] Phase 3: Next.js ダッシュボード構築
 - [ ] Phase 4: LINE Notify アラート連携

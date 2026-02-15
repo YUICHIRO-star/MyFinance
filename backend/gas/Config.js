@@ -10,8 +10,8 @@
 const CONFIG = {
   // ── Gmail ──────────────────────────────────────────────
   gmail: {
-    /** 検索クエリ（ラベル + 未読） */
-    searchQuery: 'label:資産管理 is:unread',
+    /** 投資信託の約定通知メール検索クエリ（汎用） */
+    searchQuery: 'subject:約定 newer_than:1d is:unread',
     /** 一度に処理するスレッド数の上限 */
     maxThreads: 20,
   },
@@ -19,7 +19,7 @@ const CONFIG = {
   // ── Google Spreadsheet ─────────────────────────────────
   spreadsheet: {
     /** スプレッドシートID（URLの /d/ と /edit の間の部分） */
-    id: '',  // ← ユーザーが設定
+    id: '',  // ユーザーが設定
     /** シート名 */
     sheetName: '投信ログ',
   },
@@ -42,9 +42,48 @@ const CONFIG = {
   // ── エラー通知 ─────────────────────────────────────────
   notification: {
     /** エラー通知先メールアドレス */
-    adminEmail: '',  // ← ユーザーが設定
+    adminEmail: '',  // ユーザーが設定
     /** 通知メールの件名プレフィックス */
     subjectPrefix: '[MyFinance Alert]',
+  },
+
+  // ── 銀行連携設定 ───────────────────────────────────────
+  bank: {
+    /** 三井住友銀行 入出金通知メール（ラベル不要・自動検出） */
+    searchQuery: 'from:smbc.co.jp subject:三井住友銀行 newer_than:1d is:unread',
+    /** シート名 */
+    sheetName: '銀行ログ',
+    /** 初期残高（スプレッドシート作成時に使用） */
+    initialBalance: 0,
+  },
+
+  // ── 証券会社連携設定（ラベル不要・自動検出） ─────────────
+  brokers: {
+    rakuten: {
+      /** 楽天証券 約定通知メール（from: tradesys@rakuten-sec.co.jp） */
+      searchQuery: 'from:rakuten-sec.co.jp subject:約定 newer_than:1d is:unread',
+      domain: 'rakuten-sec.co.jp',
+    },
+    sbi: {
+      /** SBI証券 約定通知メール（from: alert@sbisec.co.jp） */
+      searchQuery: 'from:sbisec.co.jp subject:約定 newer_than:1d is:unread',
+      domain: 'sbisec.co.jp',
+    },
+  },
+
+  // ── クレジットカード連携設定（ラベル不要・自動検出） ────────
+  creditCards: {
+    rakuten: {
+      /** 楽天カード利用通知メール（from: *@rakuten-card.co.jp） */
+      searchQuery: 'from:rakuten-card.co.jp subject:カード利用 newer_than:1d is:unread',
+      domain: 'rakuten-card.co.jp',
+    },
+  },
+
+  // ── 支出ログ設定 ────────────────────────────────────────
+  expense: {
+    /** スプレッドシートのシート名 */
+    sheetName: '支出ログ',
   },
 
   // ── Yahoo! Finance スクレイピング ──────────────────────

@@ -134,8 +134,10 @@ export const mockDashboardData: DashboardData = {
     totalProfitLossRate: 12.75,
     assetHistory: mockAssetHistory,
     allocation: mockAllocation,
-    heatmapData: generateMockHeatmap(),
-    lastUpdated: new Date().toISOString(),
+    heatmapData: [], // 省略
+    bankBalance: 1500000,
+    bankLastUpdated: '2025-05-01T10:00:00Z',
+    lastUpdated: '2025-05-01T10:00:00Z',
 };
 
 export { FUND_COLORS };

@@ -27,22 +27,20 @@ export async function fetchDashboardData(): Promise<DashboardData> {
     }
 
     try {
-        // 並列でレコードとポートフォリオを取得
-        const [recordsRes, portfolioRes] = await Promise.all([
-            fetch(`${GAS_WEB_APP_URL}?action=records`, {
-                next: { revalidate: 3600 }, // ISR: 1時間
-            }),
-            fetch(`${GAS_WEB_APP_URL}?action=portfolio`, {
-                next: { revalidate: 3600 },
-            }),
+        // 並列でレコード、ポートフォリオ、銀行残高を取得
+        const [recordsRes, portfolioRes, bankRes] = await Promise.all([
+            fetch(`${GAS_WEB_APP_URL}?action=records`, { next: { revalidate: 3600 } }),
+            fetch(`${GAS_WEB_APP_URL}?action=portfolio`, { next: { revalidate: 3600 } }),
+            fetch(`${GAS_WEB_APP_URL}?action=bank`, { next: { revalidate: 0 } }), // 銀行残高は常に最新
         ]);
 
-        if (!recordsRes.ok || !portfolioRes.ok) {
-            throw new Error(`API Error: records=${recordsRes.status}, portfolio=${portfolioRes.status}`);
+        if (!recordsRes.ok || !portfolioRes.ok || !bankRes.ok) {
+            throw new Error(`API Error: records=${recordsRes.status}, portfolio=${portfolioRes.status}, bank=${bankRes.status}`);
         }
 
         const recordsData: ApiResponse<TransactionRecord[]> = await recordsRes.json();
         const portfolioData: ApiResponse<PortfolioItem[]> = await portfolioRes.json();
+        const bankData: ApiResponse<{ balance: number, lastUpdated: string }> = await bankRes.json();
 
         if (recordsData.status !== 'ok' || portfolioData.status !== 'ok') {
             throw new Error('API returned error status');
@@ -50,11 +48,17 @@ export async function fetchDashboardData(): Promise<DashboardData> {
 
         const records = recordsData.data || [];
         const portfolio = portfolioData.data || [];
+        const bankBalance = bankData.data?.balance || 0;
+        const bankLastUpdated = bankData.data?.lastUpdated || null;
 
         // 集計を算出
-        const totalAssets = portfolio.reduce((sum, p) => sum + (p.currentValue || 0), 0);
+        const totalInvestmentValue = portfolio.reduce((sum, p) => sum + (p.currentValue || 0), 0);
         const totalInvested = portfolio.reduce((sum, p) => sum + p.totalInvested, 0);
-        const totalProfitLoss = totalAssets - totalInvested;
+        
+        // 総資産 = 投資評価額 + 銀行残高
+        const totalAssets = totalInvestmentValue + bankBalance;
+        
+        const totalProfitLoss = totalInvestmentValue - totalInvested;
         const totalProfitLossRate = totalInvested > 0 ? (totalProfitLoss / totalInvested) * 100 : 0;
 
         return {
@@ -62,11 +66,13 @@ export async function fetchDashboardData(): Promise<DashboardData> {
             records,
             totalAssets,
             totalInvested,
-            totalProfitLoss,
-            totalProfitLossRate,
+            totalProfitLoss, // 投資の損益
+            totalProfitLossRate, // 投資の損益率
             assetHistory: buildAssetHistory(records),
             allocation: buildAllocation(portfolio),
             heatmapData: buildHeatmapData(records),
+            bankBalance,
+            bankLastUpdated,
             lastUpdated: portfolioData.timestamp || new Date().toISOString(),
         };
     } catch (error) {

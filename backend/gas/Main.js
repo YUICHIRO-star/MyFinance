@@ -34,12 +34,81 @@ function processNewTransactions() {
         const parsedEmails = fetchAndParseEmails();
 
         if (parsedEmails.length === 0) {
-            logInfo(MODULE, '処理対象の取引データがありません。終了します。');
-            logInfo(MODULE, `========== ETLバッチ処理を完了 (${elapsedMs(startTime)}ms) ==========`);
+            logInfo(MODULE, '処理対象の投資信託メールはありません。');
+        }
+
+        // ── Step 1.5: 銀行メール取得・解析 ──
+        logInfo(MODULE, '[Step 1.5] 銀行メール取得・解析');
+        const bankTransactions = fetchAndParseBankEmails();
+        
+        for (const tx of bankTransactions) {
+            const written = writeBankRecord(tx);
+            if (written) {
+                tx.message.markRead();
+                logInfo(MODULE, '銀行取引記録成功', { desc: tx.description, amount: tx.amount });
+            } else {
+                // 重複の場合も既読にする
+                tx.message.markRead();
+            }
+        }
+
+        // ── Step 1.7: 証券会社メール取得・解析（楽天証券・SBI証券） ──
+        logInfo(MODULE, '[Step 1.7] 証券会社メール取得・解析');
+        const securitiesTrades = fetchAndParseSecuritiesEmails();
+
+        for (const trade of securitiesTrades) {
+            // 既存の投信ログと同じスキーマで記録
+            // （fundMapping にない銘柄は securityName + ticker で記録）
+            const record = {
+                tradeDate: trade.tradeDate,
+                amount: Math.abs(trade.amount),
+                fundKey: trade.securityName || trade.ticker,
+                fundInfo: {
+                    ticker: trade.ticker,
+                    displayName: trade.securityName,
+                },
+                unitPrice: trade.price,
+                quantity: trade.quantity,
+                action: trade.action,
+                broker: trade.broker,
+            };
+
+            // writeRecord は既存の投信ログ書き込み関数を再利用
+            const written = writeRecord(record);
+            if (written) {
+                trade.message.markRead();
+                logInfo(MODULE, `${trade.broker} 約定記録成功`, {
+                    name: trade.securityName,
+                    amount: trade.amount,
+                });
+            } else {
+                trade.message.markRead(); // 重複でも既読に
+            }
+        }
+
+        // ── Step 1.9: クレジットカードメール取得・解析（楽天カード） ──
+        logInfo(MODULE, '[Step 1.9] クレジットカードメール取得・解析');
+        const cardExpenses = fetchAndParseCreditCardEmails();
+
+        for (const expense of cardExpenses) {
+            const written = writeExpenseRecord(expense);
+            if (written) {
+                expense.message.markRead();
+                logInfo(MODULE, `${expense.cardName} 利用記録成功`, {
+                    merchant: expense.merchant,
+                    amount: expense.amount,
+                });
+            } else {
+                expense.message.markRead(); // 重複でも既読に
+            }
+        }
+
+        if (parsedEmails.length === 0 && bankTransactions.length === 0 && securitiesTrades.length === 0 && cardExpenses.length === 0) {
+            logInfo(MODULE, '新規取引データなし。終了します。');
             return;
         }
 
-        // ── Step 2: 基準価額取得 & 口数計算 ──
+        // ── Step 2: 基準価額取得 & 口数計算 (投信のみ) ──
         logInfo(MODULE, `[Step 2/3] 基準価額取得 (${parsedEmails.length} 件)`);
         let successCount = 0;
         let skipCount = 0;
@@ -209,13 +278,22 @@ function doGet(e) {
                     timestamp: new Date().toISOString(),
                 };
                 break;
+                
+            case 'bank':
+                logInfo(MODULE, 'Bank Balance API リクエスト');
+                responseData = {
+                    status: 'ok',
+                    data: getBankBalance(),
+                    timestamp: new Date().toISOString()
+                };
+                break;
 
             case 'health':
             default:
                 responseData = {
                     status: 'ok',
                     message: 'MyFinance GAS Backend is running',
-                    version: '1.0.0',
+                    version: '1.1.0',
                     timestamp: new Date().toISOString(),
                 };
                 break;
@@ -236,4 +314,53 @@ function doGet(e) {
             }))
             .setMimeType(ContentService.MimeType.JSON);
     }
+}
+
+/**
+ * 残高調整用API (POST)
+ * Payload: { action: 'adjust_balance', amount: 123456 }
+ */
+function doPost(e) {
+    const MODULE = 'WebAPI(POST)';
+    try {
+        const payload = JSON.parse(e.postData.contents);
+        
+        if (payload.action === 'adjust_balance') {
+            const current = getBankBalance();
+            const targetBalance = Number(payload.amount);
+            const diff = targetBalance - current.balance;
+            
+            if (diff === 0) {
+                return jsonResponse({ status: 'ok', message: 'No adjustment needed' });
+            }
+            
+            // 調整レコードを追加
+            const record = {
+                date: new Date(),
+                description: '残高調整（手動）',
+                amount: diff
+            };
+            
+            writeBankRecord(record);
+            
+            return jsonResponse({ 
+                status: 'ok', 
+                message: 'Balance adjusted', 
+                adjustment: diff,
+                newBalance: targetBalance
+            });
+        }
+        
+        return jsonResponse({ status: 'error', message: 'Invalid action' });
+        
+    } catch (error) {
+         logError(MODULE, 'POST Error', { error: error.message });
+         return jsonResponse({ status: 'error', message: error.message });
+    }
+}
+
+function jsonResponse(data) {
+    return ContentService
+        .createTextOutput(JSON.stringify(data))
+        .setMimeType(ContentService.MimeType.JSON);
 }

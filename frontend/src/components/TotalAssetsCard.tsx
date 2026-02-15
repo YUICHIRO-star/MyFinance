@@ -12,6 +12,7 @@ interface TotalAssetsCardProps {
     totalInvested: number;
     totalProfitLoss: number;
     totalProfitLossRate: number;
+    bankBalance: number;
     lastUpdated: string;
 }
 
@@ -20,10 +21,12 @@ export default function TotalAssetsCard({
     totalInvested,
     totalProfitLoss,
     totalProfitLossRate,
+    bankBalance,
     lastUpdated,
 }: TotalAssetsCardProps) {
     const plColor = getProfitLossColor(totalProfitLoss);
     const plIcon = getProfitLossIcon(totalProfitLoss);
+    const investmentValue = totalAssets - bankBalance;
 
     return (
         <div className="card p-6 md:p-8 col-span-full relative overflow-hidden">
@@ -60,28 +63,41 @@ export default function TotalAssetsCard({
                     </p>
                 </div>
 
-                {/* サブメトリクス */}
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-6 border-t border-[var(--color-border)]">
-                    {/* 累計投資額 */}
-                    <div>
-                        <p className="text-xs text-[var(--color-text-muted)] mb-1">累計投資額</p>
-                        <p className="text-lg font-semibold number-display">{formatCurrency(totalInvested)}</p>
+                {/* 内訳・サブメトリクス */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-6 border-t border-[var(--color-border)]">
+                    {/* 左側: 資産内訳 */}
+                    <div className="grid grid-cols-2 gap-4">
+                        <div>
+                            <p className="text-xs text-[var(--color-text-muted)] mb-1 flex items-center gap-1">
+                                <span className="w-2 h-2 rounded-full bg-blue-500"></span> 投資信託
+                            </p>
+                            <p className="text-lg font-semibold number-display">{formatCurrency(investmentValue)}</p>
+                            <div className="text-xs mt-1">
+                                <span className={`${plColor}`}>
+                                    {plIcon} {formatCurrency(Math.abs(totalProfitLoss))}
+                                </span>
+                            </div>
+                        </div>
+                        <div>
+                            <p className="text-xs text-[var(--color-text-muted)] mb-1 flex items-center gap-1">
+                                <span className="w-2 h-2 rounded-full bg-green-500"></span> 銀行預金
+                            </p>
+                            <p className="text-lg font-semibold number-display">{formatCurrency(bankBalance)}</p>
+                        </div>
                     </div>
 
-                    {/* 評価損益 */}
-                    <div>
-                        <p className="text-xs text-[var(--color-text-muted)] mb-1">評価損益</p>
-                        <p className={`text-lg font-semibold number-display ${plColor}`}>
-                            {plIcon} {formatCurrency(Math.abs(totalProfitLoss))}
-                        </p>
-                    </div>
-
-                    {/* 損益率 */}
-                    <div>
-                        <p className="text-xs text-[var(--color-text-muted)] mb-1">トータルリターン</p>
-                        <p className={`text-lg font-semibold number-display ${plColor}`}>
-                            {formatPercent(totalProfitLossRate)}
-                        </p>
+                    {/* 右側: 投資パフォーマンス */}
+                    <div className="grid grid-cols-2 gap-4 md:border-l md:border-[var(--color-border)] md:pl-6">
+                         <div>
+                            <p className="text-xs text-[var(--color-text-muted)] mb-1">累計投資額</p>
+                            <p className="text-lg font-semibold number-display">{formatCurrency(totalInvested)}</p>
+                        </div>
+                        <div>
+                            <p className="text-xs text-[var(--color-text-muted)] mb-1">トータルリターン</p>
+                            <p className={`text-lg font-semibold number-display ${plColor}`}>
+                                {formatPercent(totalProfitLossRate)}
+                            </p>
+                        </div>
                     </div>
                 </div>
             </div>

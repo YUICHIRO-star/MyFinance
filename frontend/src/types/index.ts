@@ -64,5 +64,7 @@ export interface DashboardData {
     assetHistory: AssetHistoryPoint[];
     allocation: AllocationSlice[];
     heatmapData: HeatmapValue[];
+    bankBalance: number;
+    bankLastUpdated: string | null;
     lastUpdated: string;
 }
