@@ -791,6 +791,7 @@ function fetchAndParseCreditCardEmails() {
                         results.push({
                             message: message,
                             cardName: cardKey,
+                            sourceId: message.getId(),
                             ...parsed,
                         });
                     } else {

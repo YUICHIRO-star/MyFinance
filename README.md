@@ -1,88 +1,87 @@
-# MyFinance 🏦
+# MyFinance v2
 
-プライバシーファーストの個人資産管理システム。
+残高・投資・支出・分析の根拠を、一画面で確認する個人向け金融アプリ。
+Next.js / TypeScript。日本語・スマートフォン対応。
 
-## アーキテクチャ
+**現時点は動作する個人利用MVPです。銀行・証券の公式APIへの本番接続、全カードのリアルタイム監視は未実装です。初期画面は架空のデモであり、実口座ではありません。**
 
-```
-MyFinance/
-├── backend/
-│   └── gas/                    # Google Apps Script (ETL)
-│       ├── appsscript.json     # GAS マニフェスト
-│       ├── Config.js           # 設定ファイル（ユーザー編集対象）
-│       ├── Utils.js            # ユーティリティ関数
-│       ├── EmailParser.js      # メール解析（Ingestion）
-│       ├── YahooScraper.js     # Yahoo!ファイナンス スクレイパー（Enrichment）
-│       ├── SpreadsheetWriter.js # スプレッドシート書き込み（Storage）
-│       └── Main.js             # メイン処理 + Web API
-│
-└── frontend/                   # Next.js Dashboard
-    ├── src/
-    │   ├── app/
-    │   │   ├── layout.tsx      # ルートレイアウト
-    │   │   ├── page.tsx        # ダッシュボードページ (Server Component)
-    │   │   ├── DashboardClient.tsx  # ダッシュボードクライアント
-    │   │   └── globals.css     # デザインシステム
-    │   ├── components/         # UIコンポーネント
-    │   │   ├── Header.tsx
-    │   │   ├── TotalAssetsCard.tsx
-    │   │   ├── AssetAllocationChart.tsx
-    │   │   ├── HistoricalTrendChart.tsx
-    │   │   ├── ExpenseHeatmap.tsx
-    │   │   ├── PortfolioTable.tsx
-    │   │   └── TransactionLog.tsx
-    │   ├── lib/                # ロジック層
-    │   │   ├── dataFetcher.ts
-    │   │   ├── formatters.ts
-    │   │   └── mockData.ts
-    │   └── types/
-    │       └── index.ts
-    ├── package.json
-    └── next.config.mjs
-```
+## 起動
 
-## セットアップ
-
-### 1. GAS Backend
-
-1. [Google Apps Script](https://script.google.com/) で新しいプロジェクトを作成
-2. `backend/gas/` 内の各ファイルをコピー
-3. `Config.js` を編集:
-   - `CONFIG.spreadsheet.id` にスプレッドシートIDを設定
-   - `CONFIG.notification.adminEmail` にメールアドレスを設定
-   - `CONFIG.fundMapping` に保有銘柄を追加
-4. `Main.js` の `setupTrigger()` を手動実行してトリガーを設定
-5. 「デプロイ」→「ウェブアプリ」でWeb APIをデプロイ
-
-### 2. Frontend Dashboard
+Node.js 22.18以上。
 
 ```bash
 cd frontend
-npm install
-cp .env.local.example .env.local
-# .env.local を編集（GAS_WEB_APP_URL 等）
-npm run dev
+npm ci
+npm run dev -- --hostname 127.0.0.1
 ```
 
-### 3. Gmail フィルタ設定
+`http://localhost:3000` を開く。金融機関のIDやパスワードは不要。
+本番ビルドは `npm run build` → `npm start -- --hostname 127.0.0.1`。
 
-1. 証券会社からの約定通知メールにフィルタを設定
-2. アクション: 「受信トレイをスキップ」「既読にする」「ラベル "資産管理" を付ける」
+## 実装済み
 
-## 技術スタック
+- ホーム：現預金、投資評価額、カード未払額、純資産、保存済み資産履歴。
+- 入出金：月・店舗・カテゴリ・口座・確定状態の検索、予算編集、月末支出予測。
+- 投資：証券口座別・NISA/特定/一般別の取得原価、評価額、含み損益、配分。
+- 分析：予算超過ペース、高額利用候補、投資集中度、不足データ。計算根拠と対象明細へ遷移。
+- CSV（口座・保有資産・明細）とJSON取込。デモ混在防止、整数円・日付・ID検証、一括拒否、再取込重複防止。
+- 速報→確定を明示IDで置換。返金、振替、取消、投資を区別。カード引落を生活費に二重計上しない。
+- オプションの端末暗号化保存・復号。AES-GCM / PBKDF2、パスフレーズは保存しない。
+- 認証付きGAS v2データ取得。接続モードのみ画面表示中60秒間隔で保存済み記録を再取得。
+- 任意のOllamaローカルAI解説。ユーザーが実行した場合のみ、許可した集計値だけを処理。
 
-| Layer | Technology |
-|-------|-----------|
-| **Data Source** | Gmail, Yahoo! Finance |
-| **Backend/ETL** | Google Apps Script |
-| **Database** | Google Spreadsheet |
-| **Frontend** | Next.js 15, TypeScript, Tailwind CSS v4, Recharts |
-| **Hosting** | Vercel / Cloudflare Pages |
+## 自分のデータで使う
 
-## 今後のロードマップ
+1. 「データを取り込む」で3種類のCSVテンプレートを保存。
+2. テンプレートの例を自分のデータへ置換。口座 → 保有資産 → 明細の順に取り込む。
+3. 「データ連携」→「暗号化して端末に保存」。12文字以上のパスフレーズを設定。
+4. 次回は「端末の保存データを開く」で復号。変更後は再保存する。
 
-- [x] Phase 1: 投信自動取得・口数計算・DB保存
-- [x] Phase 1.5: 銀行入出金メール解析・残高推定
-- [ ] Phase 2: クレジットカード決済メール解析
-- [x] Phase 3: Next.js ダッシュボード構築
-- [ ] Phase 4: LINE Notify アラート連携
+CSVはこのアプリの共通形式です。楽天証券・銀行・カード会社の生CSVの全形式対応ではありません。
+口座残高の上書き訂正はJSON全体を編集して再取込。同じIDのCSVで内容が変わると拒否します。
+保存前はタブのメモリ内のみ。JSON書出しは平文です。暗号化保存はブラウザーのデータ削除で消えるため、必要に応じて別の安全な保管先でバックアップしてください。
+
+## GASを接続する
+
+詳細は [接続と移行](docs/CONNECTORS.md)、列名は [データ仕様](docs/DATA_CONTRACT.md)。
+
+1. 既存GASとシートをバックアップし、`backend/gas/` の更新コードを反映。
+2. Script Propertiesにランダムな32文字以上の `FINANCE_API_TOKEN` を設定。
+3. `FinanceAccounts`、`FinanceHoldings` などのシートを共通CSVのヘッダーで準備。
+4. GASの新しいバージョンをデプロイ。古い公開デプロイが残る場合は別途無効化。
+5. `frontend/.env.local.example` を `.env.local` にコピーし、`GAS_WEB_APP_URL`、`GAS_API_TOKEN`、`FINANCE_USER`、20文字以上の `FINANCE_PASSWORD` を設定。
+
+認証未設定で実データ接続を有効にすると起動後のアクセスを503で遮断します。APIでも再認証し、Middlewareだけに依存しません。GASの匿名GET・残高変更POSTは廃止。APIトークンはサーバー間POST本文のみで渡します。
+
+ネットワーク越しの利用はHTTPSが前提です。現時点のBasic認証は単独利用向けで、多人数サービス用ではありません。銀行ログイン情報をこのアプリに入力しないでください。
+
+## AIを有効にする
+
+アプリを動かす同一マシンでOllamaとモデルを用意し、`.env.local` の `OLLAMA_MODEL` にインストール済みのモデル名を指定。アプリ認証も必要です。
+接続先は固定 `http://127.0.0.1:11434/api/chat`。iPhoneのブラウザー内でLLMが動くわけではありません。
+未設定・停止中・タイムアウトではエラーを表示し、生成済みのようには見せません。ルール分析はLLMなしで動きます。
+
+## 検証
+
+```bash
+cd frontend
+npm test
+npm run typecheck
+npm run lint
+npm run build
+```
+
+テスト対象：純資産、返金・振替除外、速報置換、日付・JST、欠損株価、CSV二重取込・不正値、認証、GAS公開経路廃止、メールID重複排除、暗号化保存の改ざん検出。
+[検証結果](docs/VALIDATION.md)を参照。
+
+## 既存版から直した点
+
+通信失敗時のモック切替、投資額に一律10%を足した架空資産履歴、未認証の残高書換え、ブラウザーへのGAS URL埋込み、同額同日の別カード利用の誤った重複排除を修正。
+旧証券メールは売買方向・株式単位を保持できない投信ログへの書込みをやめ、`SecuritiesInbox`で要確認として保存。過去に欠落した売買区分を推測で復元しません。
+
+## 次の接続開発
+
+別途構想中のAV JAPAN radarとの共通化候補と、公開案件情報／個人金融情報の分離方針は [Radarとの設計上の接点](docs/AV_RADAR_ALIGNMENT.md) を参照。Radarとのデータ接続は未実装です。
+
+公式API接続は、提供者の利用許可、開発用ID、スコープ、データ鮮度を確認した後に実装します。Moneytree LINKの公式資料と、更新頻度・二重計上・認証更新の設計は [接続設計](docs/CONNECTORS.md) にまとめています。
+全金融機関の完全即時同期、バックグラウンドPush通知、複数ユーザー、確定申告、投資売買、自動発注は現在の実装範囲に含みません。

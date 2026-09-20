@@ -464,27 +464,14 @@ function writeExpenseRecord(expense) {
     const sheet = getOrCreateExpenseSheet();
     const dateStr = formatDate(expense.date);
 
-    // 重複チェック
+    // Same-day, same-amount purchases are legitimate. Only deduplicate stable message IDs.
+    if (!expense.sourceId) throw new Error('Missing card message ID');
     const lastRow = sheet.getLastRow();
     if (lastRow > 1) {
-        const data = sheet.getRange(2, 1, lastRow - 1, 3).getValues();
-        for (const row of data) {
-            const existingDate = row[0] instanceof Date ? formatDate(row[0]) : String(row[0]);
-            const existingAmount = Number(row[1]);
-            const existingMerchant = String(row[2]);
-
-            if (existingDate === dateStr &&
-                existingAmount === expense.amount &&
-                existingMerchant === expense.merchant) {
-                logInfo(MODULE, '重複レコードをスキップ', {
-                    date: dateStr,
-                    amount: expense.amount,
-                    merchant: expense.merchant,
-                });
-                return false;
-            }
-        }
+        const sourceIds = sheet.getRange(2, 8, lastRow - 1, 1).getValues();
+        if (sourceIds.some(row => String(row[0]) === expense.sourceId)) return false;
     }
+    sheet.getRange(1, 8, 1, 2).setValues([['source_id', 'replaces_id']]);
 
     // 新しい行に書き込み
     sheet.appendRow([
@@ -495,6 +482,8 @@ function writeExpenseRecord(expense) {
         expense.paymentMethod,
         expense.isExpress ? '速報' : '',
         new Date(),
+        expense.sourceId,
+        '', // Set to original message ID only after confirming the match.
     ]);
 
     logInfo(MODULE, '支出レコード記録', {
