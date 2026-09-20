@@ -1,89 +1,73 @@
-import { NextRequest, NextResponse } from 'next/server';
-
-const GAS_API_URL = process.env.GAS_WEB_APP_URL;
-
-if (!GAS_API_URL) {
-    console.error('GAS_WEB_APP_URL is not defined in environment variables.');
-}
-
-/**
- * GET Handler
- * Proxies requests to GAS Web API.
- * Supports caching for 'records' and 'portfolio' types.
- */
+import { NextRequest, NextResponse } from "next/server";
+import { authorized } from "@/lib/access";
+import { validateSnapshot } from "@/lib/finance";
+export const dynamic = "force-dynamic";
+const json = (body: unknown, status = 200) =>
+  NextResponse.json(body, {
+    status,
+    headers: { "Cache-Control": "private, no-store" },
+  });
 export async function GET(request: NextRequest) {
-    if (!GAS_API_URL) {
-        return NextResponse.json({ error: 'Server Configuration Error' }, { status: 500 });
-    }
-
-    const searchParams = request.nextUrl.searchParams;
-    const type = searchParams.get('type') || 'health';
-
-    // Map frontend 'type' to GAS 'action'
-    let action = 'health';
-    if (type === 'invest') action = 'records'; // Or 'portfolio' depending on need, let's stick to records for raw data
-    if (type === 'asset') action = 'portfolio'; // For dashboard summary
-    if (type === 'bank') action = 'bank';
-
-    const gasUrl = `${GAS_API_URL}?action=${action}`;
-
-    try {
-        // Cache configuration based on type
-        // Bank balance should be fresh, Investment data can be cached
-        const revalidate = (type === 'bank') ? 0 : 3600; // 1 hour cache for investments
-
-        const res = await fetch(gasUrl, {
-            next: { revalidate: revalidate }
-        });
-
-        if (!res.ok) {
-            throw new Error(`GAS API responded with status ${res.status}`);
-        }
-
-        const data = await res.json();
-        return NextResponse.json(data);
-
-    } catch (error: any) {
-        console.error('API Proxy Error (GET):', error);
-        return NextResponse.json({ error: 'Failed to fetch data from GAS', details: error.message }, { status: 502 });
-    }
+  if (
+    !(await authorized(
+      request.headers.get("authorization"),
+      process.env.FINANCE_USER,
+      process.env.FINANCE_PASSWORD,
+    ))
+  )
+    return json({ error: "認証が必要です" }, 401);
+  if (!process.env.GAS_WEB_APP_URL || !process.env.GAS_API_TOKEN)
+    return json({ error: "GAS接続URLまたはAPIトークンが未設定です" }, 503);
+  try {
+    const url = new URL(process.env.GAS_WEB_APP_URL);
+    if (
+      url.protocol !== "https:" ||
+      url.hostname !== "script.google.com" ||
+      !/^\/macros\/s\/[^/]+\/exec$/.test(url.pathname)
+    )
+      return json({ error: "GASのHTTPSデプロイURLを設定してください" }, 503);
+    // Secret in POST body, never in browser bundles, URLs, or logs.
+    const response = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        action: "snapshot_v2",
+        token: process.env.GAS_API_TOKEN,
+      }),
+      cache: "no-store",
+      signal: AbortSignal.timeout(20000),
+    });
+    if (!response.ok)
+      return json(
+        { error: "連携先に接続できません。最後の取得データを保持します" },
+        502,
+      );
+    const payload = await response.json();
+    if (payload.status !== "ok")
+      return json({ error: "連携先の認証またはデータ取得に失敗しました" }, 502);
+    const snapshot = validateSnapshot(payload.data);
+    if (snapshot.mode !== "live")
+      return json(
+        { error: "実データAPIから不正なデータ種別を受信しました" },
+        502,
+      );
+    return json(snapshot);
+  } catch {
+    return json(
+      {
+        error:
+          "接続タイムアウトまたはデータ形式エラーです。架空データへの切り替えは行いません",
+      },
+      502,
+    );
+  }
 }
-
-/**
- * POST Handler
- * Proxies balance adjustment requests to GAS Web API.
- */
-export async function POST(request: NextRequest) {
-    if (!GAS_API_URL) {
-        return NextResponse.json({ error: 'Server Configuration Error' }, { status: 500 });
-    }
-
-    try {
-        const body = await request.json();
-
-        // Security check: simple validation
-        if (body.action !== 'adjust_balance' || typeof body.amount !== 'number') {
-             return NextResponse.json({ error: 'Invalid payload' }, { status: 400 });
-        }
-
-        const res = await fetch(GAS_API_URL, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify(body),
-            cache: 'no-store' // Never cache POST requests
-        });
-
-        if (!res.ok) {
-             throw new Error(`GAS API responded with status ${res.status}`);
-        }
-
-        const data = await res.json();
-        return NextResponse.json(data);
-
-    } catch (error: any) {
-        console.error('API Proxy Error (POST):', error);
-        return NextResponse.json({ error: 'Failed to post data to GAS', details: error.message }, { status: 502 });
-    }
+export async function POST() {
+  return json(
+    {
+      error:
+        "残高の書換APIは無効です。確認済みデータを取込または連携先で更新してください",
+    },
+    405,
+  );
 }

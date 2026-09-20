@@ -17,6 +17,11 @@
  * 時間主導型トリガー（1時間ごと）から呼ばれる。
  */
 function processNewTransactions() {
+    const lock = LockService.getScriptLock();
+    if (!lock.tryLock(5000)) return;
+    try { processNewTransactionsLocked(); } finally { lock.releaseLock(); }
+}
+function processNewTransactionsLocked() {
     const MODULE = 'Main';
     const startTime = new Date();
 
@@ -57,33 +62,8 @@ function processNewTransactions() {
         const securitiesTrades = fetchAndParseSecuritiesEmails();
 
         for (const trade of securitiesTrades) {
-            // 既存の投信ログと同じスキーマで記録
-            // （fundMapping にない銘柄は securityName + ticker で記録）
-            const record = {
-                tradeDate: trade.tradeDate,
-                amount: Math.abs(trade.amount),
-                fundKey: trade.securityName || trade.ticker,
-                fundInfo: {
-                    ticker: trade.ticker,
-                    displayName: trade.securityName,
-                },
-                unitPrice: trade.price,
-                quantity: trade.quantity,
-                action: trade.action,
-                broker: trade.broker,
-            };
-
-            // writeRecord は既存の投信ログ書き込み関数を再利用
-            const written = writeRecord(record);
-            if (written) {
-                trade.message.markRead();
-                logInfo(MODULE, `${trade.broker} 約定記録成功`, {
-                    name: trade.securityName,
-                    amount: trade.amount,
-                });
-            } else {
-                trade.message.markRead(); // 重複でも既読に
-            }
+            writeSecuritiesInbox(trade);
+            trade.message.markRead();
         }
 
         // ── Step 1.9: クレジットカードメール取得・解析（楽天カード） ──
@@ -253,114 +233,29 @@ function elapsedMs(startTime) {
  * @param {Object} e - イベントオブジェクト
  * @returns {GoogleAppsScript.Content.TextOutput}
  */
-function doGet(e) {
-    const MODULE = 'WebAPI';
-    const action = e.parameter.action || 'health';
-
-    try {
-        let responseData;
-
-        switch (action) {
-            case 'records':
-                logInfo(MODULE, 'Records API リクエスト');
-                responseData = {
-                    status: 'ok',
-                    data: getAllRecords(),
-                    timestamp: new Date().toISOString(),
-                };
-                break;
-
-            case 'portfolio':
-                logInfo(MODULE, 'Portfolio API リクエスト');
-                responseData = {
-                    status: 'ok',
-                    data: getPortfolioSummary(),
-                    timestamp: new Date().toISOString(),
-                };
-                break;
-                
-            case 'bank':
-                logInfo(MODULE, 'Bank Balance API リクエスト');
-                responseData = {
-                    status: 'ok',
-                    data: getBankBalance(),
-                    timestamp: new Date().toISOString()
-                };
-                break;
-
-            case 'health':
-            default:
-                responseData = {
-                    status: 'ok',
-                    message: 'MyFinance GAS Backend is running',
-                    version: '1.1.0',
-                    timestamp: new Date().toISOString(),
-                };
-                break;
-        }
-
-        return ContentService
-            .createTextOutput(JSON.stringify(responseData))
-            .setMimeType(ContentService.MimeType.JSON);
-
-    } catch (e) {
-        logError(MODULE, 'API エラー', { error: e.message }, true);
-
-        return ContentService
-            .createTextOutput(JSON.stringify({
-                status: 'error',
-                message: e.message,
-                timestamp: new Date().toISOString(),
-            }))
-            .setMimeType(ContentService.MimeType.JSON);
-    }
+function doGet() {
+    // Never expose financial records, balances or mutations through public GET.
+    return jsonResponse({ status: 'error', message: 'Authenticated POST required' });
 }
 
-/**
- * 残高調整用API (POST)
- * Payload: { action: 'adjust_balance', amount: 123456 }
- */
+/** Token set ONLY in Script Properties; never commit it to Config.js. */
 function doPost(e) {
-    const MODULE = 'WebAPI(POST)';
     try {
         const payload = JSON.parse(e.postData.contents);
-        
-        if (payload.action === 'adjust_balance') {
-            const current = getBankBalance();
-            const targetBalance = Number(payload.amount);
-            const diff = targetBalance - current.balance;
-            
-            if (diff === 0) {
-                return jsonResponse({ status: 'ok', message: 'No adjustment needed' });
-            }
-            
-            // 調整レコードを追加
-            const record = {
-                date: new Date(),
-                description: '残高調整（手動）',
-                amount: diff
-            };
-            
-            writeBankRecord(record);
-            
-            return jsonResponse({ 
-                status: 'ok', 
-                message: 'Balance adjusted', 
-                adjustment: diff,
-                newBalance: targetBalance
-            });
+        const expected = PropertiesService.getScriptProperties().getProperty('FINANCE_API_TOKEN');
+        if (!expected || expected.length < 32 || typeof payload.token !== 'string' || payload.token.length !== expected.length) {
+            return jsonResponse({ status: 'error', message: 'Unauthorized' });
         }
-        
-        return jsonResponse({ status: 'error', message: 'Invalid action' });
-        
-    } catch (error) {
-         logError(MODULE, 'POST Error', { error: error.message });
-         return jsonResponse({ status: 'error', message: error.message });
+        let diff = 0;
+        for (let i = 0; i < expected.length; i++) diff |= expected.charCodeAt(i) ^ payload.token.charCodeAt(i);
+        if (diff !== 0) return jsonResponse({ status: 'error', message: 'Unauthorized' });
+        if (payload.action !== 'snapshot_v2') return jsonResponse({ status: 'error', message: 'Unsupported action' });
+        return jsonResponse({ status: 'ok', data: getFinanceSnapshotV2() });
+    } catch (_) {
+        // Do not leak sheet identifiers, tokens, data or exception details.
+        return jsonResponse({ status: 'error', message: 'Snapshot unavailable' });
     }
 }
-
 function jsonResponse(data) {
-    return ContentService
-        .createTextOutput(JSON.stringify(data))
-        .setMimeType(ContentService.MimeType.JSON);
+    return ContentService.createTextOutput(JSON.stringify(data)).setMimeType(ContentService.MimeType.JSON);
 }
