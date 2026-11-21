@@ -1139,8 +1139,40 @@ select {
   font-size: 10px;
   margin-top: 13px;
 }
+.csv-preview {
+  margin-top: 20px;
+  overflow-wrap: anywhere;
+}
+.csv-preview h3 {
+  margin: 0;
+  font-size: 15px;
+}
+.csv-preview p {
+  margin: 6px 0 12px;
+  color: var(--teal);
+  font-size: 14px;
+  font-weight: 600;
+}
+.csv-preview table {
+  white-space: normal;
+}
+.csv-preview caption {
+  text-align: left;
+  font-size: 11px;
+  color: var(--muted);
+  margin-bottom: 6px;
+}
+.csv-preview td,
+.csv-preview th {
+  padding: 8px 6px;
+}
+.csv-preview td:first-child,
+.csv-preview .amount {
+  white-space: nowrap;
+}
 .modal-actions {
   display: flex;
+  flex-wrap: wrap;
   justify-content: flex-end;
   gap: 10px;
   margin-top: 20px;

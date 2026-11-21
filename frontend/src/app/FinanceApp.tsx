@@ -5,15 +5,17 @@ import {
   analyze,
   emptySnapshot,
   freshness,
-  importCsv,
   jstDate,
+  kindNames,
   monthOf,
+  previewCsv,
   summarize,
   validateSnapshot,
   yen,
 } from "@/lib/finance";
-import type { Snapshot } from "@/lib/finance";
+import type { CsvPreview, Snapshot } from "@/lib/finance";
 import { decryptVault, encryptVault, VAULT_KEY } from "@/lib/vault";
+import CsvImportPreview from "./CsvImportPreview";
 
 type Tab = "overview" | "expenses" | "investments" | "insights" | "connections";
 const nav: [Tab, string, string][] = [
@@ -29,13 +31,6 @@ const sourceNames = {
   manual: "手動",
   email: "メール由来",
   api: "API",
-};
-const kindNames = {
-  expense: "支出",
-  refund: "返金",
-  income: "収入",
-  transfer: "振替",
-  investment: "投資",
 };
 function Icon({ name, size = 20 }: { name: string; size?: number }) {
   const paths: Record<string, React.ReactNode> = {
@@ -280,19 +275,43 @@ export default function FinanceApp({
     [vaultExists, setVaultExists] = useState(false);
   const [inspected, setInspected] = useState<string[] | null>(null),
     [aiConsent, setAiConsent] = useState(false);
-  const input = useRef<HTMLInputElement>(null);
+  const [pendingCsv, setPendingCsv] = useState<{
+    preview: CsvPreview;
+    filename: string;
+    selection: symbol;
+  } | null>(null);
+  const ledger = useRef(data);
+  const activeSelection = useRef<symbol | null>(null);
+  const fileInput = useRef<HTMLInputElement>(null);
   const dialog = useRef<HTMLElement>(null);
   const generation = useRef(0),
     request = useRef<AbortController | null>(null);
+  const discardImport = useCallback(() => {
+    activeSelection.current = null;
+    setPendingCsv(null);
+  }, []);
+  const closeImport = useCallback(() => {
+    discardImport();
+    setImportOpen(false);
+  }, [discardImport]);
+  const updateLedger = useCallback(
+    (next: Snapshot) => {
+      discardImport();
+      ledger.current = next;
+      setData(next);
+      setAi("");
+    },
+    [discardImport],
+  );
   const replaceData = (next: Snapshot) => {
     generation.current++;
     request.current?.abort();
     setBusy(false);
-    setData(next);
-    setAi("");
+    updateLedger(next);
   };
   useEffect(
     () => () => {
+      activeSelection.current = null;
       request.current?.abort();
     },
     [],
@@ -309,7 +328,7 @@ export default function FinanceApp({
     const previous = document.activeElement as HTMLElement;
     const onKey = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
-        setImportOpen(false);
+        closeImport();
         setVaultOpen(null);
         setPassphrase("");
       }
@@ -333,7 +352,7 @@ export default function FinanceApp({
       document.removeEventListener("keydown", onKey);
       previous?.focus();
     };
-  }, [importOpen, vaultOpen]);
+  }, [importOpen, vaultOpen, closeImport]);
   const today = jstDate();
   const total = summarize(data, month, budget, today),
     insights = analyze(data, month, budget, today);
@@ -375,10 +394,12 @@ export default function FinanceApp({
       if (!res.ok) throw new Error(body.error || "取得できませんでした");
       const next = validateSnapshot(body);
       if (epoch !== generation.current) return;
-      setData(next);
-      setAi("");
+      const discardedFile = activeSelection.current !== null;
+      updateLedger(next);
       setNotice(
-        "連携先の記録を再取得しました。金融機関自体の即時更新を保証するものではありません。",
+        discardedFile
+          ? "台帳が更新されました。取り込むファイルをもう一度選択してください。"
+          : "連携先の記録を再取得しました。金融機関自体の即時更新を保証するものではありません。",
       );
     } catch (e) {
       if (!controller.signal.aborted && epoch === generation.current)
@@ -393,7 +414,7 @@ export default function FinanceApp({
         setBusy(false);
       }
     }
-  }, [configured]);
+  }, [configured, updateLedger]);
   useEffect(() => {
     if (configured) void refresh();
   }, [configured, refresh]);
@@ -404,29 +425,52 @@ export default function FinanceApp({
     }, 60000);
     return () => clearInterval(timer);
   }, [configured, data.mode, refresh]);
+  function finishImport(next: Snapshot, filename: string) {
+    replaceData(next);
+    setInspected(null);
+    setNotice(
+      `${filename} を取り込みました。保存前はこのタブ内のみです。データ連携から暗号化保存できます。`,
+    );
+  }
   async function onImport(file?: File) {
+    discardImport();
     if (!file) return;
+    const selected = Symbol();
+    activeSelection.current = selected;
     setError("");
     setNotice("");
     try {
       if (file.size > 2_000_000)
         throw new Error("ファイルは2MB以下にしてください");
       const text = await file.text();
-      let next: Snapshot;
+      if (selected !== activeSelection.current) return;
       if (file.name.toLowerCase().endsWith(".json")) {
-        next = validateSnapshot(JSON.parse(text));
-        if (next.mode !== "demo") next = { ...next, mode: "import" };
-      } else next = importCsv(text, data);
-      replaceData(next);
-      setInspected(null);
-      setNotice(
-        `${file.name} を取り込みました。保存前はこのタブ内のみです。データ連携から暗号化保存できます。`,
-      );
+        const next = validateSnapshot(JSON.parse(text));
+        finishImport(
+          next.mode === "demo" ? next : { ...next, mode: "import" },
+          file.name,
+        );
+      } else {
+        const preview = previewCsv(text, ledger.current);
+        setPendingCsv({ preview, filename: file.name, selection: selected });
+      }
     } catch (e) {
-      setError(e instanceof Error ? e.message : "取込に失敗しました");
-    } finally {
-      if (input.current) input.current.value = "";
+      if (selected === activeSelection.current) {
+        activeSelection.current = null;
+        setError(e instanceof Error ? e.message : "取込に失敗しました");
+      }
     }
+  }
+  function confirmCsv() {
+    if (!pendingCsv || pendingCsv.selection !== activeSelection.current) return;
+    fileInput.current?.focus();
+    const { preview, filename } = pendingCsv;
+    if (preview.added === 0) {
+      discardImport();
+      setNotice(`${filename} はすべて同内容です。台帳への追加はありません。`);
+      return;
+    }
+    finishImport(preview.snapshot, filename);
   }
   async function vaultAction() {
     setVaultBusy(true);
@@ -1462,7 +1506,7 @@ export default function FinanceApp({
         <div
           className="modal-backdrop"
           onClick={(e) => {
-            if (e.target === e.currentTarget) setImportOpen(false);
+            if (e.target === e.currentTarget) closeImport();
           }}
         >
           <section
@@ -1471,9 +1515,6 @@ export default function FinanceApp({
             role="dialog"
             aria-modal="true"
             aria-labelledby="import-title"
-            onKeyDown={(e) => {
-              if (e.key === "Escape") setImportOpen(false);
-            }}
           >
             <div className="panel-heading">
               <div>
@@ -1484,7 +1525,7 @@ export default function FinanceApp({
                 className="icon-button"
                 autoFocus
                 aria-label="取込画面を閉じる"
-                onClick={() => setImportOpen(false)}
+                onClick={closeImport}
               >
                 <Icon name="close" />
               </button>
@@ -1509,13 +1550,24 @@ export default function FinanceApp({
               <strong>CSVまたはバックアップJSONを選択</strong>
               <p>UTF-8 · 2MBまで · サーバーへ自動送信しません</p>
               <input
-                ref={input}
+                ref={fileInput}
                 type="file"
                 accept=".csv,.json"
                 aria-label="取込ファイル"
-                onChange={(e) => void onImport(e.target.files?.[0])}
+                onChange={(e) => {
+                  const file = e.currentTarget.files?.[0];
+                  e.currentTarget.value = "";
+                  void onImport(file);
+                }}
               />
             </div>
+            {pendingCsv && (
+              <CsvImportPreview
+                preview={pendingCsv.preview}
+                filename={pendingCsv.filename}
+                money={money}
+              />
+            )}
             {error && (
               <p className="message error" role="alert">
                 {error}
@@ -1527,7 +1579,7 @@ export default function FinanceApp({
               </p>
             )}
             <p className="footnote">
-              最初のCSV取込でデモを置換します。JSONは全体を置換します。同一IDのCSVは重複取込しません。保存前のデータは再読込すると消えます。取込後はデータ連携画面から暗号化保存できます。JSON保存は平文のため、保管先に注意してください。
+              CSVは「取り込む」で新規行を反映します。デモの表示中は確定時にデモを置き換えます。JSONは選択時に台帳全体を置き換えます。再読込後も使うにはデータ連携画面で暗号化保存してください。JSON保存は平文です。
             </p>
             <div className="modal-actions">
               <button
@@ -1542,12 +1594,26 @@ export default function FinanceApp({
               >
                 JSONを保存
               </button>
-              <button
-                className="button primary"
-                onClick={() => setImportOpen(false)}
-              >
-                画面に戻る
-              </button>
+              {pendingCsv ? (
+                <>
+                  <button
+                    className="button"
+                    onClick={() => {
+                      discardImport();
+                      fileInput.current?.focus();
+                    }}
+                  >
+                    取り消す
+                  </button>
+                  <button className="button primary" onClick={confirmCsv}>
+                    取り込む
+                  </button>
+                </>
+              ) : (
+                <button className="button primary" onClick={closeImport}>
+                  画面に戻る
+                </button>
+              )}
             </div>
           </section>
         </div>

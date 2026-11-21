@@ -1,0 +1,4 @@
+id,accountId,date,merchant,amount,kind,status,category,replaces
+c001,card,2026-11-01,架空ストア,1200,expense,posted,食費,
+c002,card,2026-11-02,架空カフェ,600,expense,posted,外食,
+c003,card,2026-11-02,架空カフェ,600,expense,posted,外食,
